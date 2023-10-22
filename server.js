@@ -1,28 +1,25 @@
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const officegen = require('officegen');
-const bodyParser = require('body-parser');
+const mammoth = require('mammoth');
+const htmlToPdf = require('html-pdf');
 
 const app = express();
 
-app.use(bodyParser.urlencoded({ extended: false }));
 app.use(express.static('public'));
 
 const storage = multer.diskStorage({
     destination: 'uploads',
     filename: (req, file, cb) => {
-        cb(null, file.fieldname + '-' + Date.now() + path.extname(file.originalname));
+        cb(null, file.fieldname + '-' + Date.now() + '.pdf');
     }
 });
 
 const upload = multer({
     storage: storage,
     fileFilter: function (req, file, callback) {
-        const ext = path.extname(file.originalname);
-        if (ext !== '.pdf' && ext !== '.png' && ext !== '.jpg' && ext !== '.jpeg') {
-            return callback(new Error('Only PDF, PNG, JPG, and JPEG files are allowed'));
+        const ext = file.originalname.toLowerCase();
+        if (!ext.match(/\.(jpg|jpeg|png|pdf)$/)) {
+            return callback(new Error('Only JPG, JPEG, PNG, and PDF files are allowed'));
         }
         callback(null, true);
     }
@@ -34,19 +31,28 @@ app.post('/convert', upload.single('file'), (req, res) => {
         return;
     }
 
-    const xlsx = officegen('docx');
+    const inputFilePath = req.file.path;
 
-    const table = xlsx.makeTable(2, 2);
-    table.style = 'MediumGrid1Accent2';
-    table.setCellText(1, 1, 'Cell 1,1');
-    table.setCellText(1, 2, 'Cell 1,2');
-    table.setCellText(2, 1, 'Cell 2,1');
-    table.setCellText(2, 2, 'Cell 2,2');
+    if (inputFilePath.endsWith('.pdf')) {
+        // PDF to Word conversion
+        const outputFilePath = 'public/output.docx';
 
-    const docx = fs.createWriteStream('public/output.docx');
-    xlsx.generate(docx);
-
-    res.sendFile(path.join(__dirname, 'public', 'output.docx'));
+        mammoth.convertToHtml({ path: inputFilePath })
+            .then(result => {
+                return mammoth.convertToDocx({ array: result.value });
+            })
+            .then(docx => {
+                docx.write(outputFilePath);
+                res.download(outputFilePath);
+            })
+            .catch(err => {
+                console.error(err);
+                res.status(500).send('Conversion failed.');
+            });
+    } else {
+        // Image to Word conversion
+        res.status(400).send('Only PDF files are supported for conversion.');
+    }
 });
 
 const port = process.env.PORT || 3000;
